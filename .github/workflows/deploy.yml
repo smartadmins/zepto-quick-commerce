@@ -1,4 +1,4 @@
-xname: Zepto CI/CD
+name: Zepto CI/CD
 
 on:
   push:
