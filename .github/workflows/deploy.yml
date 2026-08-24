@@ -274,4 +274,3 @@ jobs:
           kubectl get pods -n ${{ env.K8S_NAMESPACE }}
           kubectl get services -n ${{ env.K8S_NAMESPACE }}
           kubectl get ingress -n ${{ env.K8S_NAMESPACE }}
-```
