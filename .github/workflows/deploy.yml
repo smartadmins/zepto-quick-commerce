@@ -1,32 +1,108 @@
-name: Zepto CI/CD
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zepto-backend
+  namespace: zepto
+  labels:
+    app: zepto-backend
+spec:
+  replicas: 2
 
-on:
-  push:
-    branches:
-      - main
+  selector:
+    matchLabels:
+      app: zepto-backend
 
-permissions:
-  contents: read
-  id-token: write
+  template:
+    metadata:
+      labels:
+        app: zepto-backend
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
+    spec:
+      containers:
+        - name: backend
+          image: us-east1-docker.pkg.dev/zepto-ecommerce-app-506504/zepto-repo/zepto-backend:latest
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+          ports:
+            - containerPort: 5000
+              protocol: TCP
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v3
-        with:
-          workload_identity_provider: 'projects/165290163749/locations/global/workloadIdentityPools/github-pool/providers/github-provider-v2'
-          service_account: 'github-actions-zepto@zepto-ecommerce-app-506504.iam.gserviceaccount.com'
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
 
-      - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
 
-      - name: Verify Google Cloud authentication
-        run: |
-          gcloud auth list
-          gcloud config set project zepto-ecommerce-app-506504
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zepto-frontend
+  namespace: zepto
+  labels:
+    app: zepto-frontend
+spec:
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: zepto-frontend
+
+  template:
+    metadata:
+      labels:
+        app: zepto-frontend
+
+    spec:
+      containers:
+        - name: frontend
+          image: us-east1-docker.pkg.dev/zepto-ecommerce-app-506504/zepto-repo/zepto-frontend:latest
+
+          ports:
+            - containerPort: 80
+              protocol: TCP
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
