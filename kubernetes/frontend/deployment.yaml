@@ -23,8 +23,7 @@ spec:
 
         - name: frontend
 
-          image: asia-south1-docker.pkg.dev/zepto-ecommerce-class/zepto-repo/zepto-frontend:v1
-
+          image: us-east1-docker.pkg.dev/zepto-ecommerce-app-506504/zepto-repo/zepto-frontend:v1
           ports:
             - containerPort: 80
 
