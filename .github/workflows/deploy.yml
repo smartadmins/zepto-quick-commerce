@@ -281,5 +281,5 @@ jobs:
 
       - name: Verify Rollback
         run: |
-          kubectl rollout status deployment/zepto-backend -n ${{ env.K8S_NAMESPACE }} --timeout=180s
-          kubectl rollout status deployment/zepto-frontend -n ${{ env.K8S_NAMESPACE }} --timeout=180s
+          kubectl rollout status kubernetes/backend -n ${{ env.K8S_NAMESPACE }} --timeout=180s
+          kubectl rollout status kubernetes/frontend -n ${{ env.K8S_NAMESPACE }} --timeout=180s
