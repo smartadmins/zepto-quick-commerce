@@ -13,7 +13,7 @@ permissions:
 
 env:
   # Replace these values with your actual GCP project details
-  PROJECT_ID: "zepto-ecommerce-app-506504"  # e.g., "zepto-commerce-123456"
+  PROJECT_ID: "165290163749"  # e.g., "zepto-commerce-123456"
   GAR_LOCATION: "us-east1"  # e.g., "us-central1", "europe-west1"
   GAR_REPOSITORY: "zepto-repo"  # Your Artifact Registry repository name
   GKE_CLUSTER: "zepto-gke-cluster"  # Your GKE cluster name
