@@ -79,7 +79,7 @@ jobs:
           # IMPORTANT: Use PROJECT NUMBER (not project ID) in the provider path
           # Format: projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL_ID/providers/PROVIDER_ID
           project_id: ${{ env.PROJECT_ID }}
-          workload_identity_provider: "projects/165290163749/locations/global/workloadIdentityPools/zepto-pool/providers/zepto-provider"
+          workload_identity_provider: "projects/165290163749/locations/global/workloadIdentityPools/github-actions-zepto/providers/zepto-provider"
           service_account: "github-actions-zepto@zepto-ecommerce-app-506504.iam.gserviceaccount.com"
 
       - name: Setup Google Cloud CLI
