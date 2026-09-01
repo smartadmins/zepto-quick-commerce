@@ -1,4 +1,3 @@
-```yaml
 name: Zepto Quick Commerce CI/CD
 
 on:
@@ -347,4 +346,3 @@ jobs:
           kubectl get pods -n "${K8S_NAMESPACE}"
           kubectl get services -n "${K8S_NAMESPACE}"
           kubectl get ingress -n "${K8S_NAMESPACE}"
-```
