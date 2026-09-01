@@ -1,97 +1,350 @@
-name: GKE Cluster Create (PowerShell)
+```yaml
+name: Zepto Quick Commerce CI/CD
 
 on:
+  push:
+    branches:
+      - main
+      - development
+
   workflow_dispatch:
-    inputs:
-      cluster_name:
-        default: gke-cluster-in-workflow
-      zone:
-        default: asia-south1-a
+
+permissions:
+  contents: read
+  id-token: write
 
 env:
-  PROJECT_ID: gke-cluster-creation-workflow
-  CLUSTER_NAME: ${{ inputs.cluster_name }}
-  ZONE: ${{ inputs.zone }}
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GAR_LOCATION: ${{ vars.GAR_LOCATION }}
+  GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
+  GKE_CLUSTER: ${{ vars.GKE_CLUSTER }}
+  GKE_LOCATION: ${{ vars.GKE_LOCATION }}
+  K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE }}
 
 jobs:
-  create-gke-cluster:
-    runs-on: windows-latest   # PowerShell is native here
-    permissions:
-      contents: read
-      id-token: write         # needed for Workload Identity Federation (keyless auth)
+
+  # ==========================================
+  # JOB 1: TEST APPLICATION
+  # ==========================================
+
+  test:
+
+    name: Test Application
+
+    runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout (optional, needed if repo has manifests/scripts)
-      - name: Checkout repo
+
+      - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      # 2. Authenticate to GCP (Workload Identity Federation - no JSON key stored)
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
+      # ----------------------------------------
+      # Frontend Test
+      # ----------------------------------------
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build Frontend
+        working-directory: frontend
+        run: npm run build
+
+      # ----------------------------------------
+      # Backend Test
+      # ----------------------------------------
+
+      - name: Install Backend Dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Check Backend Application
+        working-directory: backend
+        run: node --check server.js
+
+
+  # ==========================================
+  # JOB 2: BUILD AND PUSH DOCKER IMAGES
+  # ==========================================
+
+  build-and-push:
+
+    name: Build and Push Docker Images
+
+    runs-on: ubuntu-latest
+
+    needs: test
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      # ----------------------------------------
+      # Validate Configuration
+      # ----------------------------------------
+
+      - name: Validate Configuration
+        run: |
+          set -e
+
+          test -n "${PROJECT_ID}" || {
+            echo "ERROR: GCP_PROJECT_ID GitHub Variable is empty"
+            exit 1
+          }
+
+          test -n "${GAR_LOCATION}" || {
+            echo "ERROR: GAR_LOCATION GitHub Variable is empty"
+            exit 1
+          }
+
+          test -n "${GAR_REPOSITORY}" || {
+            echo "ERROR: GAR_REPOSITORY GitHub Variable is empty"
+            exit 1
+          }
+
+          echo "PROJECT_ID=${PROJECT_ID}"
+          echo "GAR_LOCATION=${GAR_LOCATION}"
+          echo "GAR_REPOSITORY=${GAR_REPOSITORY}"
+
+      # ----------------------------------------
+      # Authenticate to Google Cloud
+      # ----------------------------------------
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
-      # 3. Install gcloud SDK
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+      # ----------------------------------------
+      # Setup gcloud
+      # ----------------------------------------
 
-      # 4. Everything below is PowerShell (pwsh), calling gcloud CLI
-      - name: Set GCP project
-        shell: pwsh
-        run: |
-          gcloud config set project $env:PROJECT_ID
-          Write-Host "Project set to $env:PROJECT_ID"
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
 
-      - name: Create GKE cluster (skip if exists)
-        shell: pwsh
-        run: |
-          gcloud container clusters describe $env:CLUSTER_NAME --zone $env:ZONE 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Cluster '$env:CLUSTER_NAME' already exists. Skipping creation."
-          } else {
-            Write-Host "Creating cluster '$env:CLUSTER_NAME' in zone '$env:ZONE'..."
-            gcloud container clusters create $env:CLUSTER_NAME `
-              --zone $env:ZONE `
-              --num-nodes 2 `
-              --machine-type e2-medium `
-              --release-channel regular `
-              --quiet
-            if ($LASTEXITCODE -ne 0) {
-              Write-Error "Cluster creation failed."
-              exit 1
-            }
-          }
+      # ----------------------------------------
+      # Configure Docker
+      # ----------------------------------------
 
-      - name: Verify cluster was created
-        shell: pwsh
+      - name: Configure Docker for Artifact Registry
         run: |
-          $exists = gcloud container clusters list `
-            --filter="name=$env:CLUSTER_NAME" `
-            --format="value(name)"
-          if ([string]::IsNullOrWhiteSpace($exists)) {
-            Write-Error "Verification failed: cluster not found."
+          gcloud auth configure-docker \
+            "${GAR_LOCATION}-docker.pkg.dev" \
+            --quiet
+
+      # ----------------------------------------
+      # Set Image Tag
+      # ----------------------------------------
+
+      - name: Set Image Tag
+        run: |
+          echo "IMAGE_TAG=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      # ----------------------------------------
+      # Build Frontend Image
+      # ----------------------------------------
+
+      - name: Build Frontend Docker Image
+        run: |
+          docker build \
+            -t "${GAR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPOSITORY}/zepto-frontend:${IMAGE_TAG}" \
+            ./frontend
+
+      # ----------------------------------------
+      # Build Backend Image
+      # ----------------------------------------
+
+      - name: Build Backend Docker Image
+        run: |
+          docker build \
+            -t "${GAR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPOSITORY}/zepto-backend:${IMAGE_TAG}" \
+            ./backend
+
+      # ----------------------------------------
+      # Push Frontend
+      # ----------------------------------------
+
+      - name: Push Frontend Image
+        run: |
+          docker push \
+            "${GAR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPOSITORY}/zepto-frontend:${IMAGE_TAG}"
+
+      # ----------------------------------------
+      # Push Backend
+      # ----------------------------------------
+
+      - name: Push Backend Image
+        run: |
+          docker push \
+            "${GAR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPOSITORY}/zepto-backend:${IMAGE_TAG}"
+
+
+  # ==========================================
+  # JOB 3: DEPLOY TO GKE
+  # ==========================================
+
+  deploy:
+
+    name: Deploy to GKE
+
+    runs-on: ubuntu-latest
+
+    needs: build-and-push
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      # ----------------------------------------
+      # Validate Configuration
+      # ----------------------------------------
+
+      - name: Validate Configuration
+        run: |
+          set -e
+
+          test -n "${PROJECT_ID}" || {
+            echo "ERROR: GCP_PROJECT_ID GitHub Variable is empty"
             exit 1
-          } else {
-            Write-Host "Verified: cluster '$exists' exists."
           }
 
-      - name: Print complete cluster information
-        shell: pwsh
+          test -n "${GAR_LOCATION}" || {
+            echo "ERROR: GAR_LOCATION GitHub Variable is empty"
+            exit 1
+          }
+
+          test -n "${GAR_REPOSITORY}" || {
+            echo "ERROR: GAR_REPOSITORY GitHub Variable is empty"
+            exit 1
+          }
+
+          test -n "${GKE_CLUSTER}" || {
+            echo "ERROR: GKE_CLUSTER GitHub Variable is empty"
+            exit 1
+          }
+
+          test -n "${GKE_LOCATION}" || {
+            echo "ERROR: GKE_LOCATION GitHub Variable is empty"
+            exit 1
+          }
+
+          test -n "${K8S_NAMESPACE}" || {
+            echo "ERROR: K8S_NAMESPACE GitHub Variable is empty"
+            exit 1
+          }
+
+          echo "PROJECT_ID=${PROJECT_ID}"
+          echo "GAR_LOCATION=${GAR_LOCATION}"
+          echo "GAR_REPOSITORY=${GAR_REPOSITORY}"
+          echo "GKE_CLUSTER=${GKE_CLUSTER}"
+          echo "GKE_LOCATION=${GKE_LOCATION}"
+          echo "K8S_NAMESPACE=${K8S_NAMESPACE}"
+
+      # ----------------------------------------
+      # Authenticate to Google Cloud
+      # ----------------------------------------
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      # ----------------------------------------
+      # Setup gcloud
+      # ----------------------------------------
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+
+      # ----------------------------------------
+      # Get GKE Credentials
+      # ----------------------------------------
+
+      - name: Get GKE Credentials
+        uses: google-github-actions/get-gke-credentials@v3
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ env.GKE_LOCATION }}
+          project_id: ${{ env.PROJECT_ID }}
+
+      # ----------------------------------------
+      # Set Image Tag
+      # ----------------------------------------
+
+      - name: Set Image Tag
         run: |
-          Write-Host "===== FULL CLUSTER DETAILS ====="
-          gcloud container clusters describe $env:CLUSTER_NAME `
-            --zone $env:ZONE `
-            --format="yaml"
+          echo "IMAGE_TAG=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
-          Write-Host "`n===== NODE POOLS ====="
-          gcloud container node-pools list `
-            --cluster $env:CLUSTER_NAME `
-            --zone $env:ZONE
+      # ----------------------------------------
+      # Update Backend Image
+      # ----------------------------------------
 
-          Write-Host "`n===== CREDENTIALS FETCH (kubectl context) ====="
-          gcloud components install gke-gcloud-auth-plugin --quiet
-          $env:USE_GKE_GCLOUD_AUTH_PLUGIN = "True"
-          gcloud container clusters get-credentials $env:CLUSTER_NAME --zone $env:ZONE
-          kubectl cluster-info
-          kubectl get nodes -o wide
+      - name: Update Backend Image
+        run: |
+          kubectl -n "${K8S_NAMESPACE}" set image \
+            deployment/zepto-backend \
+            backend="${GAR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPOSITORY}/zepto-backend:${IMAGE_TAG}"
+
+      # ----------------------------------------
+      # Update Frontend Image
+      # ----------------------------------------
+
+      - name: Update Frontend Image
+        run: |
+          kubectl -n "${K8S_NAMESPACE}" set image \
+            deployment/zepto-frontend \
+            frontend="${GAR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${GAR_REPOSITORY}/zepto-frontend:${IMAGE_TAG}"
+
+      # ----------------------------------------
+      # Wait for Backend Rollout
+      # ----------------------------------------
+
+      - name: Verify Backend Deployment
+        run: |
+          kubectl rollout status \
+            deployment/zepto-backend \
+            -n "${K8S_NAMESPACE}" \
+            --timeout=180s
+
+      # ----------------------------------------
+      # Wait for Frontend Rollout
+      # ----------------------------------------
+
+      - name: Verify Frontend Deployment
+        run: |
+          kubectl rollout status \
+            deployment/zepto-frontend \
+            -n "${K8S_NAMESPACE}" \
+            --timeout=180s
+
+      # ----------------------------------------
+      # Verify Kubernetes Resources
+      # ----------------------------------------
+
+      - name: Verify Kubernetes Resources
+        run: |
+          kubectl get pods -n "${K8S_NAMESPACE}"
+          kubectl get services -n "${K8S_NAMESPACE}"
+          kubectl get ingress -n "${K8S_NAMESPACE}"
+```
