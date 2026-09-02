@@ -23,7 +23,8 @@ spec:
 
         - name: backend
 
-          image: us-east1-docker.pkg.dev/zepto-ecommerce-app-506504/zepto-repo/zepto-backend:v1
+          image: asia-south1-docker.pkg.dev/zepto-ecommerce-class-507015/zepto-repo/zepto-backend:v1
+          
           ports:
             - containerPort: 5000
 
